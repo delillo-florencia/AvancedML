@@ -68,8 +68,16 @@ class MaskedCouplingLayer(nn.Module):
             The sum of the log determinants of the Jacobian matrices of the forward transformations of dimension `(batch_size, feature_dim)`.
         """
         x = z
-        log_det_J = torch.zeros(z.shape[0])
-        return x, log_det_J
+        #log_det_J = torch.zeros(z.shape[0])
+        #Tz : z --> z'
+        #z′ = b ⊙ z + (1 − b) ⊙ (z ⊙ exp (s(b ⊙ z)) + t(b ⊙ z)) (13)
+        b=self.mask
+        s=self.scale_net
+        t=self.translation_net
+        T_z=b*x + (1-b) * (x*torch.exp(s(b*x) + t(b*x)))
+        log_det_J = torch.sum(s(b*x) * (1 - b), -1)
+
+        return T_z, log_det_J
     
     def inverse(self, x):
         """
@@ -85,8 +93,14 @@ class MaskedCouplingLayer(nn.Module):
             The sum of the log determinants of the Jacobian matrices of the inverse transformations.
         """
         z = x
-        log_det_J = torch.zeros(x.shape[0])
-        return z, log_det_J
+        #log_det_J = torch.zeros(x.shape[0])
+        #z = b ⊙ z′ + (1 − b) ⊙ (z′ − t(b ⊙ z′)) ⊙ exp−s(b ⊙ z′)) (14)
+        b=self.mask
+        s=self.scale_net
+        t=self.translation_net
+        T_x= b*z + (1-b) * (z - t(b*z))*torch.exp(-s(b*z))
+        log_det_J = -torch.sum(s(b*z) * (1 - b), -1)
+        return T_x, log_det_J
 
 
 class Flow(nn.Module):
@@ -230,7 +244,7 @@ if __name__ == "__main__":
     # Parse arguments
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', type=str, default='train', choices=['train', 'sample'], help='what to do when running the script (default: %(default)s)')
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'sample'], help='what to do when running the script (default: %(default)s)')
     parser.add_argument('--data', type=str, default='tg', choices=['tg', 'cb'], help='toy dataset to use {tg: two Gaussians, cb: chequerboard} (default: %(default)s)')
     parser.add_argument('--model', type=str, default='model.pt', help='file to save model to or load model from (default: %(default)s)')
     parser.add_argument('--samples', type=str, default='samples.png', help='file to save samples in (default: %(default)s)')
@@ -243,6 +257,7 @@ if __name__ == "__main__":
     print('# Options')
     for key, value in sorted(vars(args).items()):
         print(key, '=', value)
+
 
     # Generate the data
     n_data = 10000000
@@ -258,7 +273,7 @@ if __name__ == "__main__":
     transformations =[]
     mask = torch.Tensor([1 if (i+j) % 2 == 0 else 0 for i in range(28) for j in range(28)])
     
-    num_transformations = 5
+    num_transformations = 25
     num_hidden = 8
 
     # Make a mask that is 1 for the first half of the features and 0 for the second half
